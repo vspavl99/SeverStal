@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import cv2
+import pandas as pd
 
 
 def mask_to_rle(mask):
@@ -33,13 +34,14 @@ def rle_to_mask(rle, shape=(1600, 256)):
 
 
 def show_defects(image, mask, pallet=((249, 192, 12), (0, 185, 241), (114, 0, 218), (249,50,12))):
+
     for i in range(4):
         image[0, mask[i] == 1] = 255
     plt.imshow(image.permute(1, 2, 0))
     plt.show()
 
 
-def show_mask_image(image, mask, pallet=((249, 192, 12), (0, 185, 241), (114, 0, 218), (249,50,12))):
+def show_mask_image(image, mask, pallet=((249, 192, 12), (0, 185, 241), (114, 0, 218), (249, 50, 12))):
     fig, ax = plt.subplots(figsize=(15, 15))
     image = image.permute(1, 2, 0).numpy()
     mask = mask.permute(1, 2, 0)
@@ -51,9 +53,13 @@ def show_mask_image(image, mask, pallet=((249, 192, 12), (0, 185, 241), (114, 0,
     plt.show()
 
 
-if __name__ == "__main__":
-    print("sosatb")
-    # image = np.ones((256, 1600, 1))
-    # image = np.array([[1, 0, 0], [0, 0, 0], [0, 0, 1]])
-    # mask_to_rle(image.T)
-    print(rle_to_mask('1 1 9 1', (3, 3)))
+def make_mask(name, df):
+    mask = np.zeros((256, 1600, 4), dtype=np.uint8)
+    rows = df.loc[name]
+    for defect in range(1, 5):
+        rle = rows[defect]
+        if not pd.isna(rle):
+            encoded = rle_to_mask(rle)
+            mask[:, :, defect - 1] = encoded
+    return mask
+

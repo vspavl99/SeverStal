@@ -2,12 +2,11 @@ from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 import cv2
 import os
-import numpy as np
 
-from utils import rle_to_mask
-from utils import show_defects
+from utils import make_mask
 import albumentations as albu
 import albumentations.pytorch as albu_pytorch
+from sklearn.model_selection import train_test_split
 
 
 class SteelDataset(Dataset):
@@ -23,19 +22,13 @@ class SteelDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        name = self.dataset['ImageId'].iloc[index]
+        name = self.dataset.iloc[index].name
         image = cv2.imread(os.path.join(self.dir, name))
         # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        mask = np.zeros((self.n_classes, self.image_size[0], self.image_size[1]))
-        defects = self.dataset[self.dataset['ImageId'] == name]['ClassId'].values
-        for defect in defects:
-            rle = self.dataset[(self.dataset['ImageId'] == name) &
-                               (self.dataset['ClassId'] == defect)]['EncodedPixels'].values[0]
-            encoded = rle_to_mask(rle)
-            mask[defect - 1, :] = encoded
+        mask = make_mask(name, self.dataset)
 
         transformed = self.transforms(image=image, mask=mask)
-        image, mask = transformed['image'], transformed['mask']
+        image, mask = transformed['image'], transformed['mask'][0].permute(2, 0 , 1)
 
         return image, mask
 
@@ -58,7 +51,7 @@ def get_transforms(list_transforms=None, phase='train'):
     list_transforms.extend(
         [
             albu.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            albu_pytorch.ToTensorV2()
+            albu_pytorch.ToTensor()
         ]
     )
 
@@ -66,12 +59,27 @@ def get_transforms(list_transforms=None, phase='train'):
     return list_transforms
 
 
+def data_provider(df, batch_size=8, shuffle=True, stratify_by=None):
+
+    if stratify_by:
+        train_df, val_df = train_test_split(df, test_size=0.2,
+                                            stratify_by=df[stratify_by],
+                                            random_state=42,
+                                            shuffle=shuffle)
+    else:
+        train_df, val_df = train_test_split(df, test_size=0.2,
+                                            random_state=42,
+                                            shuffle=shuffle)
+
+    dataloader = {'train': DataLoader(SteelDataset(train_df), batch_size=batch_size),
+                  'val': DataLoader(SteelDataset(val_df), batch_size=batch_size)}
+
+    return dataloader
+
+
 if __name__ == '__main__':
     df = pd.read_csv('train.csv')
-    dataset = SteelDataset(df)
+    df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
+    df['NumDefects'] = df.count(axis=1)
 
-    dataloader = DataLoader(dataset=dataset, batch_size=8, shuffle=True)
 
-    for i, (image, mask) in enumerate(dataloader):
-        print(i)
-        show_defects(image, mask)
