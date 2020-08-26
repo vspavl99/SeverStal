@@ -2,9 +2,10 @@ import torch
 from torch import nn
 import segmentation_models_pytorch as smp
 from dataset import data_provider
-from metrics import dice_coef
+from metrics import mean_dice_score
+from metrics import pixel_accuracy_score
+import numpy as np
 import pandas as pd
-import time
 from tqdm import tqdm_notebook as tqdm
 
 
@@ -22,17 +23,21 @@ class Trainer:
         self.df = data_frame
         self.dataloaders = data_provider(self.df, batch_size=self.batch_size)
         self.losses = {phase: [] for phase in ['train', 'val']}
-        self.metrics = {'dice': dice_coef}
-        self.metrics_values = {phase: {name : [] for name in self.metrics.keys()}
+        self.metrics = {'dice': mean_dice_score, 'pixel_acc': pixel_accuracy_score}
+        self.metrics_values = {phase: {name: 0.0 for name in self.metrics.keys()}
                                for phase in ['train', 'val']}
+        self.best_score = np.array([-np.inf for _ in self.metrics.keys()])
 
     def step(self, epoch, phase):
+
         epoch_loss = 0.0
-        epoch_metric = 0.0
+        metrics = {name: [] for name in self.metrics.keys()}
+        epoch_metric = {}
+
         if phase == 'train':
-            model.train()
+            self.model.train()
         else:
-            model.eval()
+            self.model.eval()
 
         dataloader = self.dataloaders[phase]
 
@@ -47,13 +52,21 @@ class Trainer:
                     loss.backward()
                     self.optimizer.step()
 
-                epoch_metric += self.metrics['dice'](outputs, targets) / len(dataloader)
-                epoch_loss += loss.item() / len(dataloader)
+                for metric in self.metrics.keys():
+                    metrics[metric].append(self.metrics[metric](targets, outputs))
 
+                epoch_loss += loss.item()
+
+        epoch_loss = epoch_loss / len(dataloader)
         self.losses[phase].append(epoch_loss)
-        self.metrics_values[phase]['dice'].append(epoch_metric)
+
+        for metric in self.metrics.keys():
+            epoch_metric[metric] = metrics[metric].mean()
+            self.metrics_values[phase][metric].append(epoch_metric[metric])
+
         del images, targets, outputs, loss
         torch.cuda.empty_cache()
+        return epoch_loss, epoch_metric
 
     def train(self):
         for epoch in tqdm(range(self.num_epochs)):
@@ -62,8 +75,14 @@ class Trainer:
                      'best_score': self.best_score,
                      'state_dict': self.model.state_dict(),
                      'optimizer': self.optimizer.state_dict()}
-            with torch.no_grad():
-                self.step(epoch, 'val')
+
+            loss, metric = self.step(epoch, 'val')
+            print('Epoch {} | val_loss {} | val_metric {}'.format(epoch, loss, metric))
+            self.scheduler.step(loss)
+            scores = np.fromiter(metric.values(), dtype=np.float)
+            if (scores > self.best_score).all():
+                print('-' * 10 + 'New optimal model found and saved' + '-' * 10)
+                state['best_metric'] = metric
 
 
 if __name__ == '__main__':
@@ -78,20 +97,16 @@ if __name__ == '__main__':
     df = pd.read_csv('train.csv')
     df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
     df['NumDefects'] = df.count(axis=1)
+    #
+    # model_train = Trainer(
+    #     model=model,
+    #     criterion=criterion,
+    #     optimizer=optimizer,
+    #     scheduler=scheduler,
+    #     device=device,
+    #     batch_size=1,
+    #     num_epochs=2,
+    #     data_frame=df
+    # )
+    # print(model_train.metrics_values)
 
-    model_train = Trainer(
-        model=model,
-        criterion=criterion,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        device=device,
-        batch_size=1,
-        num_epochs=2,
-        data_frame=df
-    )
-
-    model_train.step(1, 'train')
-    start = time.strftime('%H:%M:%S')
-    print(start)
-    model(torch.rand((4, 3, 256, 1600)))
-    print(time.strftime('%H:%M:%S'))

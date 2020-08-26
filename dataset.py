@@ -2,19 +2,18 @@ from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 import cv2
 import os
-
-from utils import make_mask
 import albumentations as albu
 import albumentations.pytorch as albu_pytorch
+from utils import make_mask
 from sklearn.model_selection import train_test_split
 
 
 class SteelDataset(Dataset):
-    def __init__(self, dataset, phase='train', dir='train_images', image_size=(256, 1600), n_classes=4):
+    def __init__(self, dataset, phase='train', data_dir='train_images', image_size=(256, 1600), n_classes=4):
         self.dataset = dataset
         self.phase = phase
-        self.dir = dir
-        self.transforms = get_transforms()
+        self.dir = data_dir
+        self.transforms = get_transforms(phase=self.phase)
         self.image_size = image_size
         self.n_classes = n_classes
 
@@ -28,7 +27,7 @@ class SteelDataset(Dataset):
         mask = make_mask(name, self.dataset)
 
         transformed = self.transforms(image=image, mask=mask)
-        image, mask = transformed['image'], transformed['mask'][0].permute(2, 0 , 1)
+        image, mask = transformed['image'], transformed['mask'].permute(2, 0, 1)
 
         return image, mask
 
@@ -51,7 +50,7 @@ def get_transforms(list_transforms=None, phase='train'):
     list_transforms.extend(
         [
             albu.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            albu_pytorch.ToTensor()
+            albu_pytorch.ToTensorV2()
         ]
     )
 
@@ -71,15 +70,17 @@ def data_provider(df, batch_size=8, shuffle=True, stratify_by=None):
                                             random_state=42,
                                             shuffle=shuffle)
 
-    dataloader = {'train': DataLoader(SteelDataset(train_df), batch_size=batch_size),
-                  'val': DataLoader(SteelDataset(val_df), batch_size=batch_size)}
+    dataloader = {'train': DataLoader(SteelDataset(train_df, phase='train'), batch_size=batch_size),
+                  'val': DataLoader(SteelDataset(val_df, phase='val'), batch_size=batch_size)}
+
 
     return dataloader
 
 
-if __name__ == '__main__':
+if __name__ =='__main__':
     df = pd.read_csv('train.csv')
     df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
     df['NumDefects'] = df.count(axis=1)
-
-
+    dataloader = data_provider(df)['train']
+    for i in dataloader:
+        print((i[1] == 1).sum())
