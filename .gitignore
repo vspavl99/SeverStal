@@ -6,3 +6,14 @@
 /.ipynb_checkpoints/
 /test_images.zip
 /models/
+/venv/
+/data/
+/log/
+.DS_Store
+.idea/dictionaries/
+.idea/inspectionProfiles/
+.idea/misc.xml
+.idea/modules.xml
+.idea/severstal.iml
+.idea/vcs.xml
+__pycache__/
